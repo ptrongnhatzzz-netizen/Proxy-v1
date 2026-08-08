@@ -43,7 +43,7 @@ jobs:
             os.rename('libkk.so', 'app/src/main/jniLibs/arm64-v8a/libkk.so')
             print('[Python] Liên kết libkk.so vào arm64-v8a thành công!')
         else:
-            print('[Python] CẢNH BÁO: Không tìm thấy file gốc libkk.so!')
+            raise FileNotFoundError('[Python] LỖI CỰC KỲ NGHIÊM TRỌNG: Không tìm thấy file gốc libkk.so ở thư mục gốc!')
 
         # 2. Python tạo file settings.gradle
         with open('settings.gradle', 'w') as f:
@@ -144,9 +144,8 @@ jobs:
         import android.os.IBinder;
 
         public class AntiLagService extends Service {
-            private static final String CHANNEL_ID = "AntiLagChannel";
+            private static final String CHANNEL_ID = \"AntiLagChannel\";
 
-            // Khai báo liên kết Native Method với hàm trong libkk.so
             public native void kichHoatChongLag();
 
             @Override
@@ -155,30 +154,23 @@ jobs:
                 createNotificationChannel();
                 
                 Notification notification = new Notification.Builder(this, CHANNEL_ID)
-                        .setContentTitle("Anti-Lag System")
-                        .setContentText("Hệ thống tối ưu hiệu năng đang chạy ngầm...")
+                        .setContentTitle(\"Anti-Lag System\")
+                        .setContentText(\"Hệ thống tối ưu hiệu năng đang chạy ngầm...\")
                         .setSmallIcon(android.R.drawable.ic_dialog_info)
                         .build();
                 startForeground(1, notification);
 
-                // Tạo luồng riêng biệt để liên tục nạp thư viện và thực thi hàm JNI
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
                         while (true) {
                             try {
-                                // Tải thư viện libkk.so vào bộ nhớ hệ thống
-                                System.loadLibrary("kk");
-                                
-                                // Thực thi hàm C/C++ chống lag được định nghĩa từ thư viện .so
+                                System.loadLibrary(\"kk\");
                                 kichHoatChongLag();
-                                
-                                // Tạm dừng 5 giây (5000 mili giây) theo yêu cầu
                                 Thread.sleep(5000);
                             } catch (InterruptedException e) {
                                 e.printStackTrace();
                             } catch (UnsatisfiedLinkError e) {
-                                // Bẫy lỗi nếu hàm JNI hoặc tên file .so liên kết không đúng quy chuẩn
                                 e.printStackTrace();
                             }
                         }
@@ -188,7 +180,7 @@ jobs:
 
             private void createNotificationChannel() {
                 NotificationChannel serviceChannel = new NotificationChannel(
-                        CHANNEL_ID, "Anti-Lag Engine", NotificationManager.IMPORTANCE_LOW);
+                        CHANNEL_ID, \"Anti-Lag Engine\", NotificationManager.IMPORTANCE_LOW);
                 NotificationManager manager = getSystemService(NotificationManager.class);
                 if (manager != null) manager.createNotificationChannel(serviceChannel);
             }
