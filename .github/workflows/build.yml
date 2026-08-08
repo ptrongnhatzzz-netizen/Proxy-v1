@@ -1,0 +1,214 @@
+name: Build Android Anti-Lag Project
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.5'
+
+    - name: Python Script - Link Library and Generate Code
+      run: |
+        python3 -c "
+        import os
+
+        # Khởi tạo thư mục dự án Android Studio bằng lệnh Python
+        os.makedirs('app/src/main/java/com/antilag/app', exist_ok=True)
+        os.makedirs('app/src/main/jniLibs/arm64-v8a', exist_ok=True)
+
+        # 1. Liên kết và di chuyển file thư viện libkk.so vào đúng cấu trúc jniLibs
+        if os.path.exists('libkk.so'):
+            os.rename('libkk.so', 'app/src/main/jniLibs/arm64-v8a/libkk.so')
+            print('[Python] Liên kết libkk.so vào arm64-v8a thành công!')
+        else:
+            print('[Python] CẢNH BÁO: Không tìm thấy file gốc libkk.so!')
+
+        # 2. Python tạo file settings.gradle
+        with open('settings.gradle', 'w') as f:
+            f.write(\"\"\"
+        pluginManagement {
+            repositories {
+                google()
+                mavenCentral()
+                gradlePluginPortal()
+            }
+        }
+        dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+        rootProject.name = 'AntiLagProject'
+        include ':app'
+        \"\"\")
+
+        # 3. Python tạo file build.gradle gốc
+        with open('build.gradle', 'w') as f:
+            f.write(\"\"\"
+        plugins {
+            id 'com.android.application' version '8.2.2' apply false
+        }
+        \"\"\")
+
+        # 4. Python tạo file app/build.gradle
+        with open('app/build.gradle', 'w') as f:
+            f.write(\"\"\"
+        plugins {
+            id 'com.android.application'
+        }
+        android {
+            namespace 'com.antilag.app'
+            compileSdk 34
+            defaultConfig {
+                applicationId 'com.antilag.app'
+                minSdk 26
+                targetSdk 34
+                versionCode 1
+                versionName '1.0'
+            }
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+        }
+        \"\"\")
+
+        # 5. Python tạo file cấu hình AndroidManifest.xml (Đăng ký Service và Quyền)
+        with open('app/src/main/AndroidManifest.xml', 'w') as f:
+            f.write(\"\"\"<?xml version='1.0' encoding='utf-8'?>
+        <manifest xmlns:android='http://android.com'>
+            <uses-permission android:name='android.permission.FOREGROUND_SERVICE' />
+            <uses-permission android:name='android.permission.FOREGROUND_SERVICE_SPECIAL_USE' />
+            <application android:allowBackup='true' android:label='AntiLag Core'>
+                <activity android:name='.MainActivity' android:exported='true' android:theme='@android:style/Theme.NoDisplay'>
+                    <intent-filter>
+                        <action android:name='android.intent.action.MAIN' />
+                        <category android:name='android.intent.category.LAUNCHER' />
+                    </intent-filter>
+                </activity>
+                <service android:name='.AntiLagService' android:enabled='true' android:exported='false' android:foregroundServiceType='specialUse' />
+            </application>
+        </manifest>
+        \"\"\")
+
+        # 6. Python tạo file MainActivity.java
+        with open('app/src/main/java/com/antilag/app/MainActivity.java', 'w') as f:
+            f.write(\"\"\"package com.antilag.app;
+        import android.app.Activity;
+        import android.content.Intent;
+        import android.os.Bundle;
+
+        public class MainActivity extends Activity {
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+                super.onCreate(savedInstanceState);
+                Intent serviceIntent = new Intent(this, AntiLagService.class);
+                startForegroundService(serviceIntent);
+                finish();
+            }
+        }
+        \"\"\")
+
+        # 7. Python viết mã liên kết JNI cho AntiLagService.java (Vòng lặp nạp/gọi hàm .so mỗi 5s)
+        with open('app/src/main/java/com/antilag/app/AntiLagService.java', 'w') as f:
+            f.write(\"\"\"package com.antilag.app;
+        import android.app.Notification;
+        import android.app.NotificationChannel;
+        import android.app.NotificationManager;
+        import android.app.Service;
+        import android.content.Intent;
+        import android.os.IBinder;
+
+        public class AntiLagService extends Service {
+            private static final String CHANNEL_ID = "AntiLagChannel";
+
+            // Khai báo liên kết Native Method với hàm trong libkk.so
+            public native void kichHoatChongLag();
+
+            @Override
+            public void onCreate() {
+                super.onCreate();
+                createNotificationChannel();
+                
+                Notification notification = new Notification.Builder(this, CHANNEL_ID)
+                        .setContentTitle("Anti-Lag System")
+                        .setContentText("Hệ thống tối ưu hiệu năng đang chạy ngầm...")
+                        .setSmallIcon(android.R.drawable.ic_dialog_info)
+                        .build();
+                startForeground(1, notification);
+
+                // Tạo luồng riêng biệt để liên tục nạp thư viện và thực thi hàm JNI
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        while (true) {
+                            try {
+                                // Tải thư viện libkk.so vào bộ nhớ hệ thống
+                                System.loadLibrary("kk");
+                                
+                                // Thực thi hàm C/C++ chống lag được định nghĩa từ thư viện .so
+                                kichHoatChongLag();
+                                
+                                // Tạm dừng 5 giây (5000 mili giây) theo yêu cầu
+                                Thread.sleep(5000);
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            } catch (UnsatisfiedLinkError e) {
+                                // Bẫy lỗi nếu hàm JNI hoặc tên file .so liên kết không đúng quy chuẩn
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+                }).start();
+            }
+
+            private void createNotificationChannel() {
+                NotificationChannel serviceChannel = new NotificationChannel(
+                        CHANNEL_ID, "Anti-Lag Engine", NotificationManager.IMPORTANCE_LOW);
+                NotificationManager manager = getSystemService(NotificationManager.class);
+                if (manager != null) manager.createNotificationChannel(serviceChannel);
+            }
+
+            @Override
+            public int onStartCommand(Intent intent, int flags, int startId) {
+                return START_STICKY;
+            }
+
+            @Override
+            public IBinder onBind(Intent intent) { return null; }
+        }
+        \"\"\")
+        "
+
+    - name: Build Application with Gradle
+      run: ./gradlew :app:assembleDebug
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: AntiLag-Engine-APK
+        path: app/build/outputs/apk/debug/app-debug.apk
